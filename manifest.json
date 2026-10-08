@@ -1,0 +1,21 @@
+{
+  "name": "Лист персонажа Тройка!",
+  "version": "1.0.0",
+  "manifest_version": 1,
+  "description": "Редактируемый лист персонажа для игры «Тройка!» с печатью и сохранением в PDF.",
+  "author": "Ваше имя",
+  "icon": "icon.svg",
+  "permissions": [
+    {
+      "name": "clipboard-write",
+      "reason": "Кнопка «Скопировать ссылку» кладёт ссылку на персонажа в буфер обмена."
+    }
+  ],
+  "action": {
+    "title": "Лист персонажа",
+    "icon": "icon.svg",
+    "popover": "index.html",
+    "width": 1300,
+    "height": 900
+  }
+}

@@ -1,0 +1,650 @@
+/* ==========================================================================
+   СТИЛИ листа персонажа «Тройка!»
+   --------------------------------------------------------------------------
+   Файл разделён на части (их видно по комментариям-заголовкам):
+     1. Переменные и сброс
+     2. Панель инструментов (видна только на экране)
+     3. Лист и его колонки
+     4. Блоки листа
+     5. Мелкие детали (поля, клетки, примечания)
+     6. Масштабирование под экран
+     7. ПЕЧАТЬ — самый важный для «сохранить в PDF»
+   ========================================================================== */
+
+
+/* --------------------------------------------------------------------------
+   1. ПЕРЕМЕННЫЕ И СБРОС
+   -------------------------------------------------------------------------- */
+:root {
+  --ink: #141414;          /* цвет текста и рамок */
+  --paper: #ffffff;
+  --bg: #e8e8e4;           /* фон страницы вокруг листа */
+  --toolbar: #1e2126;      /* тёмная панель сверху */
+  --accent: #8a3324;       /* акцентный цвет кнопок */
+  --font: "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --rule-panel: 2px;       /* толщина рамок блоков */
+  --rule-cell: 1.4px;      /* толщина рамок клеток */
+}
+
+* { box-sizing: border-box; }   /* ширина блока считается вместе с рамкой */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font);
+  color: var(--ink);
+  background: var(--bg);
+}
+
+/* Единый стиль для ВСЕХ полей ввода: прозрачный фон, без рамки.
+   Рамку рисует родительский блок, поэтому выглядит всё как бумажный бланк. */
+input, textarea, select, button { font-family: inherit; color: inherit; }
+
+input[type="text"], textarea {
+  border: 0;
+  background: transparent;
+  outline: none;                 /* убираем обводку фокуса … */
+  padding: 0;
+  width: 100%;
+  font-size: 9pt;
+}
+input[type="text"]:focus, textarea:focus {
+  background: #fffbe6;           /* … но подсвечиваем бледно-жёлтым, чтобы видеть, где печатаешь */
+}
+
+
+/* --------------------------------------------------------------------------
+   2. ПАНЕЛЬ ИНСТРУМЕНТОВ
+   -------------------------------------------------------------------------- */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--toolbar);
+  color: #f4f4f4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+}
+
+.brand { display: flex; align-items: baseline; gap: 8px; margin-right: 6px; }
+.brand-title { font-weight: 800; letter-spacing: 2px; font-size: 15px; }
+.brand-sub { font-size: 11px; opacity: .65; }
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;          /* чтобы группа могла сжаться и перенести кнопки */
+}
+.toolbar-right { margin-left: auto; }
+
+.ctrl-label { font-size: 11px; opacity: .7; margin-right: 2px; }
+
+.select {
+  background: #2c3038;
+  color: #fff;
+  border: 1px solid #454b55;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 13px;
+  max-width: 190px;
+}
+
+.btn {
+  background: #2c3038;
+  color: #f0f0f0;
+  border: 1px solid #454b55;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover { background: #3a404a; }
+.btn-primary { background: var(--accent); border-color: #a9442f; }
+.btn-primary:hover { background: #a0422f; }
+.btn-danger:hover { background: #5a2a2a; border-color: #8a4444; }
+
+/* Всплывающее сообщение внизу панели */
+.toast {
+  position: absolute;
+  right: 14px;
+  top: 100%;
+  margin-top: 6px;
+  background: #2c3038;
+  color: #fff;
+  border: 1px solid #4c525c;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .2s, transform .2s;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+
+/* Баннер «открыт персонаж по ссылке» */
+.banner {
+  background: #fff4d6;
+  border-bottom: 1px solid #e2cf9a;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+.linkish {
+  background: none; border: 0; padding: 0;
+  color: var(--accent); text-decoration: underline; cursor: pointer;
+  font-size: 13px;
+}
+
+
+/* --------------------------------------------------------------------------
+   3. ЛИСТ И ЕГО КОЛОНКИ
+   -------------------------------------------------------------------------- */
+.sheet-wrap {
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;   /* лист уменьшен по масштабу — прокрутка не нужна */
+}
+
+/* Сам лист — строго размер A4 в альбомной ориентации */
+.sheet {
+  width: 297mm;
+  height: 210mm;
+  flex: 0 0 auto;
+  background: var(--paper);
+  padding: 9mm 12mm 8mm 11mm;      /* поля: сверху 9, справа 12, снизу 8, слева 11 */
+  display: flex;
+  flex-direction: column;
+  gap: 3.5mm;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+  transform-origin: top center;
+}
+
+/* Верхняя строка: логотип | имя+предыстория | особенность */
+.top {
+  display: grid;
+  grid-template-columns: 66mm 84mm 1fr;
+  gap: 4mm;
+  height: 30mm;
+  flex: 0 0 auto;
+}
+
+/* Основная часть: три колонки */
+.main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 72mm 1fr 68mm;
+  gap: 4mm;
+}
+
+
+/* --------------------------------------------------------------------------
+   4. БЛОКИ ЛИСТА
+   -------------------------------------------------------------------------- */
+
+/* --- логотип --- */
+.logo { display: flex; flex-direction: column; justify-content: center; }
+.logo-word {
+  font-size: 30pt;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.logo-sub { font-size: 11pt; font-weight: 700; margin-top: 2mm; letter-spacing: .4px; }
+
+/* --- рамка-коробка с подписью сверху (ИМЯ, ПРЕДЫСТОРИЯ, ОСОБЕННОСТЬ, ДЕНЬГИ) --- */
+.box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: var(--rule-panel) solid var(--ink);
+  padding: 4.5mm 3mm 2mm;
+  min-height: 0;
+}
+.box .cap {
+  position: absolute;
+  top: 1.6mm;
+  left: 3mm;
+  font-size: 8.5pt;
+  font-weight: 700;
+  letter-spacing: .8px;
+}
+.box .fill { flex: 1; min-height: 0; }
+.box textarea.fill { resize: none; font-size: 8.5pt; line-height: 1.3; }
+
+.name-stack { display: flex; flex-direction: column; gap: 3mm; min-height: 0; }
+.box-name { height: 11mm; padding-top: 5.5mm; }
+.box-bg   { flex: 1; padding-top: 5.5mm; }
+
+/* --- общий вид панели с заголовком --- */
+.panel {
+  border: var(--rule-panel) solid var(--ink);
+  padding: 3mm 3.5mm;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;      /* содержимое никогда не вылезет за рамку блока */
+  display: flex;
+  flex-direction: column;
+}
+.panel h2 {
+  margin: 0 0 2mm;
+  font-size: 10.5pt;
+  font-weight: 700;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+
+/* --- левая колонка: навыки --- */
+.panel-skills { overflow: hidden; }
+.skill-row {
+  display: grid;
+  grid-template-columns: 1fr 6.4mm 6.4mm 6.4mm;
+  column-gap: 4.2mm;
+  align-items: center;
+}
+
+/* Заголовки трёх колонок — одна строка, прижатая вправо (как в оригинале).
+   Сеткой их делать нельзя: слова шире клеток и налезали бы друг на друга. */
+.skills-head {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1.6mm;
+  font-size: 6.5pt;
+  font-weight: 600;
+  margin-bottom: 1.5mm;
+}
+.skills-head span:first-child { margin-right: auto; }
+
+/* Строки одинаковой высоты: grid сам делит место поровну */
+.skills-rows {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+}
+/* Пунктирная линия под названием навыка — как в оригинале */
+.skill-name {
+  border-bottom: 1px dashed #9a9a9a !important;
+  font-size: 8.5pt !important;
+  height: 5.5mm;
+}
+
+/* Квадратная клетка */
+.cell {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 6.4mm;
+  height: 6.4mm;
+  border: var(--rule-cell) solid var(--ink);
+  background: #fff;
+  cursor: pointer;
+  position: relative;
+  margin: 0;
+  justify-self: center;
+}
+.cell:checked::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 1;
+}
+/* Клетки-поля для цифр Ранг / Умение / Всего — вводимые.
+   Селектор намеренно с классом ТЕГА (input.cell-input), иначе общее правило
+   input[type="text"] { border: 0 } его перебьёт по силе. */
+input.cell-input {
+  width: 6.4mm;
+  height: 6.4mm;
+  border: var(--rule-cell) solid var(--ink);
+  text-align: center;
+  font-size: 9pt;
+  justify-self: center;
+}
+
+/* --- средняя колонка --- */
+.center {
+  display: grid;
+  /* Характеристики специально крупнее: внутри них значок с вписываемым значением */
+  grid-template-rows: 50mm 51mm 1fr;
+  gap: 3.5mm;
+  min-height: 0;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3.5mm;
+  min-height: 0;
+}
+
+.stat { padding: 2.5mm 3mm; }
+.stat-head { display: flex; align-items: baseline; }
+.stat h3 {
+  margin: 0;
+  font-size: 10.5pt;
+  font-weight: 700;
+  letter-spacing: .7px;
+}
+
+.hint {
+  margin: 1.5mm 0 0;
+  font-size: 6.8pt;
+  font-style: italic;
+  line-height: 1.3;
+  color: #333;
+}
+.hint-bottom { margin-top: auto; margin-bottom: 0; }
+
+/* --- значок, внутрь которого вписывается значение характеристики ---
+   Снаружи лежит SVG-контур (кружок / сердце / звезда), поверх него —
+   прозрачное поле ввода. Клик по значку сразу попадает в поле. */
+.stat-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1mm 0;
+}
+.stat-badge {
+  position: relative;
+  width: 17mm;
+  height: 17mm;
+  flex: 0 0 auto;
+}
+.stat-badge .stat-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.stat-icon circle,
+.stat-icon path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+input.stat-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  text-align: center;
+  font-size: 14pt;
+  font-weight: 600;
+  background: transparent;
+}
+input.stat-input:focus { background: transparent; }
+/* Поле активно — значок подсвечивается цветом */
+.stat-badge:focus-within .stat-icon circle,
+.stat-badge:focus-within .stat-icon path {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.stat-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 2mm;
+  margin-top: 1mm;
+  font-size: 7.5pt;
+  font-weight: 700;
+}
+.sub-input {
+  flex: 1;
+  border-bottom: 1px solid var(--ink) !important;
+  font-size: 9pt !important;
+}
+
+/* --- оружие --- */
+.weapons-top { display: flex; align-items: baseline; justify-content: space-between; }
+.damage-cap { font-size: 7.5pt; font-weight: 600; }
+
+.weapon-head, .weapon-row {
+  display: grid;
+  grid-template-columns: 1fr repeat(7, 6.4mm);
+  column-gap: 4.2mm;
+  align-items: center;
+}
+.weapon-head {
+  font-size: 8.5pt;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 1.5mm;
+}
+.weapon-head span:first-child { text-align: left; }
+.weapon-rows {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.weapon-name {
+  border-bottom: 1px dashed #9a9a9a !important;
+  font-size: 8.5pt !important;
+  height: 5.5mm;
+}
+/* Клетки урона в строке оружия — обычные редактируемые поля input.cell-input,
+   то есть те же самые клетки, что и «Ранг / Умение / Всего» в навыках.
+   Никаких чекбоксов здесь больше нет. */
+
+/* --- нижний ряд средней колонки --- */
+.bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 40mm;
+  gap: 3.5mm;
+  min-height: 0;
+}
+
+.armor-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2mm;
+}
+.armor-top h2 { margin: 0; }
+
+/* --- щит с полем «Значение защиты» внутри --- */
+.shield-wrap { display: flex; align-items: center; gap: 1.5mm; }
+.shield-cap {
+  font-size: 6.4pt;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: right;
+}
+.shield-badge {
+  position: relative;
+  width: 12mm;              /* высота считается из пропорций 40×46 = 13.8мм */
+  height: 13.8mm;
+  flex: 0 0 auto;
+}
+.shield-badge .shield-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.shield-icon path { fill: none; stroke: var(--ink); stroke-width: 2.4; }
+/* Поле центрируется в широкой части щита (немного выше середины) */
+input.shield-input {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 15%;
+  height: 40%;
+  padding: 0;
+  text-align: center;
+  font-size: 10pt;
+  font-weight: 700;
+  background: transparent;
+}
+input.shield-input:focus { background: transparent; }
+.shield-badge:focus-within .shield-icon path {
+  stroke: var(--accent);
+  stroke-width: 3.2;
+}
+
+.armor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 7.6pt;
+  margin-top: auto;
+}
+.armor-table th {
+  font-size: 7pt;
+  font-weight: 600;
+  text-align: center;
+  padding: 0 1mm 1.2mm;
+  line-height: 1.2;
+}
+.armor-table th:first-child { text-align: left; width: 52%; }
+.armor-table td { padding: 0.6mm 1mm; }
+.armor-table td.num { text-align: center; font-size: 8.5pt; }
+.armor-table label { display: flex; align-items: center; gap: 2mm; cursor: pointer; }
+
+/* Круглые отметки уровня брони */
+.armor-table input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 3.4mm; height: 3.4mm;
+  border: 1.2px solid var(--ink);
+  border-radius: 50%;
+  margin: 0;
+  flex: 0 0 auto;
+  position: relative;
+  cursor: pointer;
+}
+.armor-table input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 0.6mm;
+  background: var(--ink);
+  border-radius: 50%;
+}
+
+/* --- пайки --- */
+.panel-rations { }
+.rations {
+  display: grid;
+  grid-template-columns: repeat(5, 5mm);
+  gap: 1.6mm;
+  justify-content: space-between;
+  margin: 1mm 0 auto;
+}
+.rations .cell { width: 5mm; height: 5mm; }
+.rations .cell:checked::after { font-size: 10pt; }
+/* В этом узком блоке примечание печатается чуть мельче, чтобы влезть в рамку */
+.panel-rations .note { font-size: 6.1pt; margin-top: 2mm; }
+
+/* --- правая колонка: инвентарь --- */
+.panel-inventory {
+  border: 0;
+  padding: 0;
+  gap: 3mm;
+}
+.inv-box {
+  border: var(--rule-panel) solid var(--ink);
+  padding: 3mm 3.5mm;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.hint-inline {
+  margin: -1mm 0 2mm;
+  font-size: 7pt;
+  font-style: italic;
+}
+/* 12 строк одной высоты: grid делит место между ними поровну */
+.inv-rows {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.inv-row {
+  display: grid;
+  grid-template-columns: 6mm 1fr;
+  align-items: center;
+  gap: 1.5mm;
+  font-size: 8.5pt;
+  font-weight: 600;
+}
+.inv-row input {
+  border-bottom: 1px dashed #9a9a9a !important;
+  height: 5mm;
+  font-size: 8.5pt;
+}
+
+.box-money { height: 16mm; padding-top: 6mm; flex: 0 0 auto; }
+
+/* --- примечания мелким шрифтом --- */
+.note {
+  margin: 2.5mm 0 0;
+  font-size: 6.6pt;
+  font-style: italic;
+  line-height: 1.35;
+  color: #2b2b2b;
+}
+
+
+/* --------------------------------------------------------------------------
+   6. МАСШТАБИРОВАНИЕ ПОД ЭКРАН
+   Лист всегда 297мм. Если окно уже — app.js ставит transform: scale(...),
+   а сюда подставляет готовое значение через CSS-переменную --scale.
+   При печати масштаб сбрасывается (см. раздел 7).
+   -------------------------------------------------------------------------- */
+.sheet-wrap { height: auto; }
+.sheet { transform: scale(var(--scale, 1)); }
+
+
+/* --------------------------------------------------------------------------
+   7. ПЕЧАТЬ / СОХРАНЕНИЕ В PDF
+   -------------------------------------------------------------------------- */
+@page {
+  size: A4 landscape;   /* альбомная ориентация A4 */
+  margin: 0;            /* без полей: лист уже содержит свои */
+}
+
+@media print {
+  html, body { background: #fff; }
+
+  /* Всё, что относится только к программе, на бумагу не попадает */
+  .no-print { display: none !important; }
+
+  .sheet-wrap {
+    padding: 0;
+    display: block;
+    height: auto !important;   /* JS задал высоту под экран — для печати мешает */
+    overflow: visible !important;
+  }
+  .sheet {
+    box-shadow: none;
+    margin: 0;
+    transform: none !important;   /* печатаем в реальный размер 297×210 мм */
+  }
+
+  /* Поля ввода печатаются как обычный текст бланка */
+  input[type="text"], textarea { background: transparent !important; }
+  input:focus, textarea:focus { background: transparent !important; }
+
+  /* Рамки клеток должны попасть на бумагу */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -1,0 +1,317 @@
+<!doctype html>
+<!--
+  ============================================================================
+  ЛИСТ ПЕРСОНАЖА «ТРОЙКА!» — главная страница приложения.
+
+  Файл отвечает ТОЛЬКО за структуру (разметку): где какой блок стоит и как
+  называется. Цвета, рамки и печать — в styles.css. Логика (сохранение,
+  переключение персонажей) — в app.js.
+
+  Как читать этот файл:
+    Строка между маркерами комментария — пояснение для человека,
+    браузер её игнорирует.
+    div       — «коробка», внутри которой лежит содержимое.
+    input     — поле, в которое пользователь что-то вписывает.
+    textarea  — многострочное поле.
+    data-field="…" — МЕТКА поля: по ней app.js понимает, в какое место
+                     сохранённых данных записывать значение.
+  ============================================================================
+-->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Тройка! — лист персонажа</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ======================================================================
+       ПАНЕЛЬ ИНСТРУМЕНТОВ.
+       Показывается только на экране (class="no-print" прячется при печати).
+       ====================================================================== -->
+  <header class="toolbar no-print">
+    <div class="brand">
+      <span class="brand-title">ТРОЙКА!</span>
+      <span class="brand-sub">лист персонажа</span>
+    </div>
+
+    <div class="toolbar-group">
+      <!-- Выпадающий список персонажей. Заполняется в app.js -->
+      <label class="ctrl-label" for="charSelect">Персонаж</label>
+      <select id="charSelect" class="select"></select>
+
+      <button type="button" id="btnNew" class="btn">＋ Новый</button>
+      <button type="button" id="btnDelete" class="btn btn-danger">Удалить</button>
+    </div>
+
+    <div class="toolbar-group toolbar-right">
+      <button type="button" id="btnPrint" class="btn btn-primary"
+              title="Откроется окно печати — выберите принтер «Сохранить как PDF»">Печать / PDF</button>
+      <button type="button" id="btnExport" class="btn"
+              title="Сохранить текущего персонажа в файл .json">Экспорт</button>
+      <button type="button" id="btnImport" class="btn"
+              title="Загрузить персонажа из файла .json">Импорт</button>
+      <button type="button" id="btnLink" class="btn"
+              title="Скопировать адрес, внутри которого зашит персонаж">Ссылка</button>
+      <input type="file" id="fileInput" accept="application/json,.json" hidden>
+    </div>
+
+    <!-- Мелкое сообщение-подсказка, которое на секунду появляется внизу -->
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </header>
+
+  <!-- Сообщение, если данные пришли по ссылке -->
+  <div id="sharedBanner" class="banner no-print" hidden>
+    Открыт персонаж, переданный по ссылке. Он сохранён в вашем браузере как
+    отдельный персонаж. <button type="button" id="btnHideBanner" class="linkish">Скрыть</button>
+  </div>
+
+  <!-- ======================================================================
+       ОБЁРТКА ЛИСТА.
+       Сюда app.js «вписывает» лист в ширину окна (масштабирование),
+       чтобы он не вылезал на узких экранах.
+       ====================================================================== -->
+  <div class="sheet-wrap" id="sheetWrap">
+
+    <!-- Сам лист. Размер точно A4 в альбомной ориентации (297×210 мм). -->
+    <form class="sheet" id="sheet" autocomplete="off">
+
+      <!-- ---------------- ВЕРХНЯЯ СТРОКА ---------------- -->
+      <div class="top">
+
+        <!-- Логотип. Просто текст: рисунок из оригинального PDF мы не используем. -->
+        <div class="logo">
+          <div class="logo-word">ТРОЙКА!</div>
+          <div class="logo-sub">Мистическое издание</div>
+        </div>
+
+        <!-- Имя и предыстория: две коробки друг под другом -->
+        <div class="name-stack">
+          <label class="box box-name">
+            <span class="cap">ИМЯ</span>
+            <input type="text" class="fill" data-field="name">
+          </label>
+          <label class="box box-bg">
+            <span class="cap">ПРЕДЫСТОРИЯ</span>
+            <input type="text" class="fill" data-field="background">
+          </label>
+        </div>
+
+        <!-- Особенность: одна широкая коробка -->
+        <label class="box box-special">
+          <span class="cap">ОСОБЕННОСТЬ</span>
+          <textarea class="fill" data-field="special"></textarea>
+        </label>
+      </div>
+
+      <!-- ---------------- ОСНОВНАЯ ЧАСТЬ: ТРИ КОЛОНКИ ---------------- -->
+      <div class="main">
+
+        <!-- ======== ЛЕВАЯ КОЛОНКА: навыки и заклинания ======== -->
+        <section class="panel panel-skills">
+          <h2>НАВЫКИ И ЗАКЛИНАНИЯ</h2>
+
+          <!-- Заголовки трёх колонок чекбоксов справа -->
+          <div class="skills-head">
+            <span></span>
+            <span>Ранг</span>
+            <span>+ Умение</span>
+            <span>= Всего</span>
+          </div>
+
+          <!-- 12 строк создаст app.js (см. buildSkills) -->
+          <div class="skills-rows" id="skillsRows"></div>
+
+          <p class="note">
+            Чтобы использовать заклинание, вы должны потратить некоторое
+            количество Выносливости, равное стоимости заклинания, а затем
+            преуспеть в проверке выбранного заклинания. Две «1» на кубиках
+            означают успех, а две «6» – провал, требующий броска по Таблице
+            «Упс!»
+          </p>
+        </section>
+
+        <!-- ======== СРЕДНЯЯ КОЛОНКА ======== -->
+        <div class="center">
+
+          <!-- Три характеристики.
+               Значение каждой вписывается ВНУТРИ иконки (кружок / сердце / звезда),
+               поэтому иконки сделаны крупными и стоят по центру панели. -->
+          <div class="stats">
+
+            <!-- Умение -->
+            <section class="panel stat">
+              <div class="stat-head">
+                <h3>УМЕНИЕ</h3>
+              </div>
+              <p class="hint">Бросьте 1к3+3,<br>чтобы определить Умение.</p>
+              <div class="stat-area">
+                <div class="stat-badge">
+                  <!-- Иконка: кружок -->
+                  <svg class="stat-icon" viewBox="0 0 40 40" aria-hidden="true">
+                    <circle cx="20" cy="20" r="18"/>
+                  </svg>
+                  <input type="text" class="stat-input" data-field="skill"
+                         aria-label="Значение Умения">
+                </div>
+              </div>
+            </section>
+
+            <!-- Выносливость -->
+            <section class="panel stat">
+              <div class="stat-head">
+                <h3>ВЫНОСЛИВОСТЬ</h3>
+              </div>
+              <p class="hint">Бросьте 2к6+12,<br>чтобы определить Выносливость.</p>
+              <div class="stat-area">
+                <div class="stat-badge">
+                  <!-- Иконка: сердце -->
+                  <svg class="stat-icon" viewBox="0 0 40 40" aria-hidden="true">
+                    <path d="M20 37 C4 26 2 16 8 10 C13 5 18 7 20 12 C22 7 27 5 32 10 C38 16 36 26 20 37 Z"/>
+                  </svg>
+                  <input type="text" class="stat-input" data-field="stamina"
+                         aria-label="Значение Выносливости">
+                </div>
+              </div>
+              <div class="stat-sub">
+                <span class="sub-cap">Урон:</span>
+                <input type="text" class="sub-input" data-field="staminaDamage">
+              </div>
+              <p class="hint hint-bottom">Восстановите 2к6 за каждый отдых.</p>
+            </section>
+
+            <!-- Удача -->
+            <section class="panel stat">
+              <div class="stat-head">
+                <h3>УДАЧА</h3>
+              </div>
+              <p class="hint">Бросьте 1к6+6,<br>чтобы определить Удачу.</p>
+              <div class="stat-area">
+                <div class="stat-badge">
+                  <!-- Иконка: восьмиконечная звезда -->
+                  <svg class="stat-icon" viewBox="0 0 40 40" aria-hidden="true">
+                    <path d="M20 3 L24 14 L35 9 L30 20 L37 26 L25 27 L26 37 L20 30 L14 37 L15 27 L3 26 L10 20 L5 9 L16 14 Z"/>
+                  </svg>
+                  <input type="text" class="stat-input" data-field="luck"
+                         aria-label="Значение Удачи">
+                </div>
+              </div>
+              <div class="stat-sub">
+                <span class="sub-cap">Потрачено:</span>
+                <input type="text" class="sub-input" data-field="luckSpent">
+              </div>
+              <p class="hint hint-bottom">Восстановите 2к6 за каждый отдых.</p>
+            </section>
+          </div>
+
+          <!-- Оружие -->
+          <section class="panel panel-weapons">
+            <div class="weapons-top">
+              <h2>ОРУЖИЕ</h2>
+              <span class="damage-cap">Урон</span>
+            </div>
+            <!-- Заголовок с числами 1…7+ и 4 строки создаст app.js -->
+            <div id="weaponsArea"></div>
+          </section>
+
+          <!-- Нижний ряд: одежда + пайки -->
+          <div class="bottom-row">
+
+            <section class="panel panel-armor">
+              <div class="armor-top">
+                <h2>ОДЕЖДА</h2>
+                <!-- Щит: внутрь него вписывается ЗНАЧЕНИЕ ЗАЩИТЫ персонажа -->
+                <div class="shield-wrap">
+                  <span class="shield-cap">Значение<br>защиты</span>
+                  <div class="shield-badge">
+                    <svg class="shield-icon" viewBox="0 0 40 46" aria-hidden="true">
+                      <path d="M20 2 L37 8 V24 C37 34 29 41 20 44 C11 41 3 34 3 24 V8 Z"/>
+                    </svg>
+                    <input type="text" class="shield-input" data-field="defense"
+                           aria-label="Значение защиты">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Таблица брони. Столбец «Значение защиты» — СПРАВОЧНЫЙ: там
+                   напечатаны значения по правилам, чтобы не искать их в книге.
+                   Фактическое значение персонажа вписывается в щит выше.
+                   Кружок слева — отметить, что персонаж это носит. -->
+              <table class="armor-table">
+                <thead>
+                  <tr>
+                    <th>Уровень защиты</th>
+                    <th>Значение<br>защиты</th>
+                    <th>Ячейки<br>инвентаря</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><label><input type="checkbox" data-field="armor.shield"><span>Щит</span></label></td>
+                    <td class="num">-1</td>
+                    <td class="num">1</td>
+                  </tr>
+                  <tr>
+                    <td><label><input type="checkbox" data-field="armor.light"><span>Лёгкая броня</span></label></td>
+                    <td class="num">-1</td>
+                    <td class="num">2</td>
+                  </tr>
+                  <tr>
+                    <td><label><input type="checkbox" data-field="armor.medium"><span>Средняя броня</span></label></td>
+                    <td class="num">-2</td>
+                    <td class="num">4</td>
+                  </tr>
+                  <tr>
+                    <td><label><input type="checkbox" data-field="armor.heavy"><span>Тяжёлая броня</span></label></td>
+                    <td class="num">-3</td>
+                    <td class="num">6</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="panel panel-rations">
+              <h2>ПАЙКИ</h2>
+              <!-- 15 клеток создаст app.js -->
+              <div class="rations" id="rationsArea"></div>
+              <p class="note">
+                Съев один Пайк восстановите 1к6 Выносливости, но не более
+                трёх раз за день.
+              </p>
+            </section>
+
+          </div>
+        </div>
+
+        <!-- ======== ПРАВАЯ КОЛОНКА: инвентарь + деньги ======== -->
+        <aside class="panel panel-inventory">
+          <div class="inv-box">
+            <h2>ИНВЕНТАРЬ</h2>
+            <p class="hint-inline">Извлечение предметов: бросьте 2к6.</p>
+
+            <!-- 12 пронумерованных строк создаст app.js -->
+            <div class="inv-rows" id="inventoryRows"></div>
+
+            <p class="note">
+              13+ предметов: все броски со штрафом -4.<br>
+              18+ предметов: едва переставляете ноги, а атаки по вам считаются
+              неожиданными.
+            </p>
+          </div>
+
+          <label class="box box-money">
+            <span class="cap">ДЕНЬГИ</span>
+            <input type="text" class="fill" data-field="money">
+          </label>
+        </aside>
+
+      </div>
+    </form>
+  </div>
+
+  <!-- app.js — вся логика. Подключается в самом конце, чтобы HTML уже был готов. -->
+  <script src="app.js"></script>
+</body>
+</html>
