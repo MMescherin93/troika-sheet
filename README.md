@@ -219,12 +219,24 @@ Owlbear Rodeo открывает лист по **ссылке**, поэтому 
 
 После того как файлы лежат в интернете (раздел 4):
 
-1. Откройте свой репозиторий на GitHub → файл `manifest.json` → кнопка
-   **Raw**. Скопируйте адрес из адресной строки — он выглядит так:
-   ```
-   https://ВАШ-ЛОГИН.github.io/troika-sheet/manifest.json
-   ```
-   (на Netlify — `https://имя.netlify.app/manifest.json`)
+1. Соберите ссылку на `manifest.json`. Формат простой: **адрес вашего сайта + `/manifest.json`**
+
+   | Где лежат файлы | Ссылка для Owlbear Rodeo |
+   |---|---|
+   | GitHub Pages | `https://ВАШ-ЛОГИН.github.io/troika-sheet/manifest.json` |
+   | Netlify Drop | `https://СЛУЧАЙНОЕ-ИМЯ.netlify.app/manifest.json` |
+
+   Обязательно откройте её в браузере: должна показаться страничка с JSON-ом
+   (имя, версия, `"popover": "index.html"`), а не 404.
+
+   > **Не годятся** эти адреса — Owlbear Rodeo их не примет:
+   > * `file:///C:/Users/.../manifest.json` — файл с диска;
+   > * `http://localhost:8771/manifest.json` — работает только на вашем ПК,
+   >   и то пока запущен локальный сервер;
+   > * `https://github.com/ВАШ-ЛОГИН/troika-sheet/raw/main/manifest.json`
+   >   и `https://raw.githubusercontent.com/...` — это кнопка **Raw**;
+   >   она отдаёт файлы как простой текст, и `index.html` откроется
+   >   в расширении не как страница, а как исходный код.
 2. В Owlbear Rodeo откройте **Rooms** → выберите комнату → меню
    (три точки или шестерёнка) → **Extensions** (Расширения).
 3. Нажмите **Load Extension** / **Add Extension** и вставьте скопированную
@@ -232,13 +244,50 @@ Owlbear Rodeo открывает лист по **ссылке**, поэтому 
 4. Появится кнопка **«Лист персонажа»** — она открывает лист прямо
    в комнате, в отдельном окне поверх карты.
 
+### Важно: пути в `manifest.json` должны начинаться со слэша
+
+Owlbear Rodeo склеивает **домен сайта** и то, что написано в `popover` / `icon`.
+Поэтому относительный путь `"index.html"` не работает — нужен путь
+**от корня сайта**, то есть начинающийся с `/`.
+
+Так записан официальный пример расширения Hello World в документации OBR:
+
+```json
+"action": { "icon": "/icon.svg", "popover": "/" }
+```
+
+GitHub Pages отдаёт сайт не из корня, а из папки с именем репозитория,
+поэтому к пути надо прибавить имя репозитория:
+
+```json
+{
+  "icon": "/troika-sheet/icon.svg",
+  "action": {
+    "icon": "/troika-sheet/icon.svg",
+    "popover": "/troika-sheet/index.html"
+  }
+}
+```
+
+| Где лежат файлы | `popover` и `icon` |
+|---|---|
+| GitHub Pages, репозиторий `troika-sheet` | `/troika-sheet/index.html`, `/troika-sheet/icon.svg` |
+| GitHub Pages, репозиторий `LOGIN.github.io` | `/index.html`, `/icon.svg` |
+| Netlify Drop, Render, свой домен | `/index.html`, `/icon.svg` |
+
+> Если оставить `"index.html"` без слэша, Owlbear Rodeo получит адрес вида
+> `https://ВАШ-ДОМИНindex.html` — и вы увидите ошибку
+> «Не удалось найти IP-адрес сервера …github.ioindex.html».
+
+> Если переименуете репозиторий — поправьте эти два пути.
+
 ### Если расширение не загрузилось
 
 | Симптом | Что проверить |
 |---|---|
 | «Invalid manifest» | Откройте ссылку на `manifest.json` в браузере — должен показаться JSON, а не страница 404. |
-| Иконка не отображается | В `manifest.json` стоит `"icon": "icon.svg"` — файл `icon.svg` должен лежать **рядом** с `manifest.json`. |
-| Открывается пустая страница | `"popover": "index.html"` — рядом должен лежать `index.html`. Иногда помогает записать полный адрес: `"popover": "https://ВАШ-ЛОГИН.github.io/troika-sheet/index.html"`. |
+| Иконка не отображается | Путь в `manifest.json` должен быть от корня сайта: `"icon": "/troika-sheet/icon.svg"`. Файл `icon.svg` должен быть залит на тот же сайт. |
+| «Не удалось найти IP-адрес сервера …github.ioindex.html» | Пути в `popover` и `icon` записаны без слэша. Нужен путь от корня сайта, например `/troika-sheet/index.html` — см. раздел выше. |
 | Ошибка про `clipboard-write` | Удалите весь блок `"permissions"` из `manifest.json` — просто станет чуть менее удобная кнопка «Ссылка». |
 | Лист открылся, но не сохраняет данные | Внутри Owlbear Rodeo у каждого игрока своё хранилище браузера. Используйте кнопку «Ссылка» или обменивайтесь JSON-файлами. |
 
