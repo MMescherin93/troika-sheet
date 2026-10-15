@@ -1,9 +1,9 @@
 {
   "name": "Лист персонажа Тройка!",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "manifest_version": 1,
   "description": "Редактируемый лист персонажа для игры «Тройка!» с печатью и сохранением в PDF.",
-  "author": "Ваше имя",
+  "author": "MMescherin93",
   "icon": "/troika-sheet/icon.svg",
   "permissions": [
     {
