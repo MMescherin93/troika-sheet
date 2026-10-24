@@ -738,8 +738,16 @@ function fitSheet() {
 function updatePublishButton() {
   const btnPublish = document.getElementById('btnPublish');
   if (!btnPublish) return;
-  if (mode.obr && OBR && isGM) {
+  if (mode.obr && OBR) {
+    // Показываем кнопку в OBR всегда - будет работать только у GM
     btnPublish.style.display = 'inline-flex';
+    if (isGM) {
+      btnPublish.disabled = false;
+      btnPublish.title = "Скопировать текущие листы в общие метаданные комнаты";
+    } else {
+      btnPublish.disabled = true;
+      btnPublish.title = "Только для Ведущего (GM)";
+    }
   } else {
     btnPublish.style.display = 'none';
   }
@@ -852,6 +860,7 @@ async function init() {
   const btnPublish = document.getElementById('btnPublish');
   if (btnPublish) {
     btnPublish.style.display = 'none';
+    btnPublish.disabled = true;
     btnPublish.addEventListener('click', async function () {
       ensureState();
       if (!mode.obr || !OBR || !isGM) {
@@ -859,14 +868,16 @@ async function init() {
         return;
       }
       btnPublish.disabled = true;
+      toast('Публикую...');
       try {
         const ok = await saveStateToRemote(state);
         if (ok) toast('Листы опубликованы для всей комнаты');
-        else toast('Не удалось опубликовать — попробуйте ещё раз');
+        else toast('Не удалось опубликовать — проверьте консоль');
       } catch (e) {
+        console.error(e);
         toast('Не удалось опубликовать');
       } finally {
-        btnPublish.disabled = false;
+        updatePublishButton();
       }
     });
   }
