@@ -185,12 +185,17 @@ function normalizeFields(saved) {
 
 /* --------------------------------------------------------------------------
    3. ХРАНИЛИЩЕ
-   localStorage может быть запрещён (например, страница открыта внутри чужого
-   iframe, как в Owlbear Rodeo, или в приватном режиме). Поэтому все обращения
-   завёрнуты в try/catch: если хранилища нет — приложение просто работает
-   «в памяти» до перезагрузки, но не падает.
+   В Owlbear Rodeo хранится в метаданных сцены — общее для всей комнаты.
+   Вне OBR — в localStorage.
    -------------------------------------------------------------------------- */
 const STORAGE_KEY = 'troika-sheet-v1';
+const SHEET_META_KEY = 'com.troika.sheet/state';
+const SDK_URL = "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
+const TIMEOUT_MS = 4000;
+
+let OBR = null;
+const mode = { obr: false };
+let lastSavedJson = null;
 
 function storageGet() {
   try { return localStorage.getItem(STORAGE_KEY); } catch (e) { return null; }
@@ -199,20 +204,67 @@ function storageSet(text) {
   try { localStorage.setItem(STORAGE_KEY, text); } catch (e) { /* нет хранилища — переживём */ }
 }
 
+function withTimeout(promise, ms, fallback) {
+  const safe = Promise.resolve(promise).then((v) => v, () => fallback);
+  return Promise.race([
+    safe,
+    new Promise((res) => setTimeout(() => res(fallback), ms)),
+  ]);
+}
+
+async function loadSDK() {
+  try {
+    const mod = await withTimeout(import(SDK_URL).catch(() => null), TIMEOUT_MS, null);
+    if (!mod) return null;
+    return mod.default || mod;
+  } catch (e) {
+    return null;
+  }
+}
+
+function sanitizeState(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (Array.isArray(raw.chars) && raw.chars.length) {
+    const next = {
+      currentId: raw.currentId || raw.chars[0].id,
+      chars: raw.chars.map(function (c) {
+        return { id: c.id || makeId(), fields: normalizeFields(c && c.fields) };
+      })
+    };
+    return next;
+  }
+  return null;
+}
+
 /** Состояние всего приложения: текущий персонаж + список персонажей. */
 let state = { currentId: null, chars: [] };
 
-function loadState() {
+async function loadStateRemote() {
+  if (mode.obr && OBR) {
+    try {
+      const meta = await withTimeout(OBR.scene.getMetadata(), TIMEOUT_MS, null);
+      const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
+      if (raw) {
+        const sanitized = sanitizeState(raw);
+        if (sanitized) {
+          try { lastSavedJson = JSON.stringify(sanitized); } catch {}
+          return sanitized;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return null;
+}
+
+function loadStateLocal() {
   const raw = storageGet();
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.chars) && parsed.chars.length) {
-        parsed.chars = parsed.chars.map(function (c) {
-          return { id: c.id || makeId(), fields: normalizeFields(c.fields) };
-        });
-        return parsed;
-      }
+      const sanitized = sanitizeState(parsed);
+      if (sanitized) return sanitized;
     } catch (e) { /* повреждённое сохранение — начнём заново */ }
   }
   // Первый запуск: создаём одного пустого персонажа
@@ -220,13 +272,42 @@ function loadState() {
   return { currentId: first.id, chars: [first] };
 }
 
-function saveState() {
-  storageSet(JSON.stringify(state));
+async function loadState() {
+  const remote = await loadStateRemote();
+  if (remote) return remote;
+  return loadStateLocal();
+}
+
+async function saveState() {
+  const json = JSON.stringify(state);
+  if (mode.obr && OBR) {
+    try {
+      lastSavedJson = json;
+      await withTimeout(OBR.scene.setMetadata({ [SHEET_META_KEY]: state }), TIMEOUT_MS, null);
+      return;
+    } catch (e) {
+      // если не получилось сохранить в сцену — сохраняем локально как fallback
+    }
+  }
+  try { 
+    lastSavedJson = json;
+    storageSet(json); 
+  } catch (e) { /* нет хранилища — переживём */ }
 }
 
 /** Текущий персонаж (или null, если списка ещё нет). */
 function currentChar() {
   return state.chars.find(function (c) { return c.id === state.currentId; }) || state.chars[0];
+}
+
+function ensureState() {
+  if (!state || !Array.isArray(state.chars) || !state.chars.length) {
+    const first = newCharacter();
+    state = { currentId: first.id, chars: [first] };
+  }
+  if (!state.currentId || !state.chars.find(function (c) { return c.id === state.currentId; })) {
+    state.currentId = state.chars[0].id;
+  }
 }
 
 /** Человекочитаемое имя: поле ИМЯ либо «Персонаж N». */
@@ -401,6 +482,7 @@ const selectEl = document.getElementById('charSelect');
 
 /** Перерисовать выпадающий список, не теряя текущий выбор. */
 function renderSelect() {
+  ensureState();
   selectEl.innerHTML = '';
   state.chars.forEach(function (char) {
     const option = document.createElement('option');
@@ -413,6 +495,7 @@ function renderSelect() {
 
 /** Показать выбранного персонажа в форме. */
 function showCharacter(id) {
+  ensureState();
   // Если запрошенного персонажа больше нет — берём первого из списка
   const exists = state.chars.some(function (c) { return c.id === id; });
   state.currentId = exists ? id : state.chars[0].id;
@@ -424,6 +507,7 @@ function showCharacter(id) {
 
 /** Создать пустого персонажа и сразу переключиться на него. */
 function addCharacter(fields) {
+  ensureState();
   const char = newCharacter(fields);
   state.chars.push(char);
   showCharacter(char.id);
@@ -431,6 +515,7 @@ function addCharacter(fields) {
 }
 
 function deleteCurrent() {
+  ensureState();
   const char = currentChar();
   if (!char) return;
   if (!window.confirm('Удалить персонажа «' + charLabel(char) + '»?')) return;
@@ -446,6 +531,7 @@ let saveTimer = null;
 function scheduleSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(function () {
+    ensureState();
     const char = currentChar();
     if (!char) return;
     char.fields = readFromForm();
@@ -462,6 +548,7 @@ function scheduleSave() {
 /** Печать. В браузере в диалоге печати можно выбрать «Сохранить как PDF». */
 function printSheet() {
   // Сначала дописываем данные в модель, чтобы печать была актуальной
+  ensureState();
   const char = currentChar();
   if (char) { char.fields = readFromForm(); saveState(); }
   window.print();
@@ -469,6 +556,7 @@ function printSheet() {
 
 /** Выгрузить текущего персонажа в файл .json */
 function exportCurrent() {
+  ensureState();
   const char = currentChar();
   if (!char) return;
   char.fields = readFromForm();
@@ -531,6 +619,7 @@ function decodeShare(text) {
 
 /** Скопировать ссылку, в которой персонаж зашит прямо в адрес. */
 function copyShareLink() {
+  ensureState();
   const char = currentChar();
   if (!char) return;
   char.fields = readFromForm();
@@ -567,6 +656,7 @@ function isEmptyCharacter(char) {
 
 /** Если открылись по ссылке с персонажем — забрать его. */
 function readShareFromUrl() {
+  ensureState();
   const match = location.hash.match(/^#d=(.+)$/);
   if (!match) return false;
 
@@ -575,11 +665,12 @@ function readShareFromUrl() {
     // Не плодим копии: если такой же персонаж уже есть — просто открываем его
     const json = JSON.stringify(fields);
     const same = state.chars.find(function (c) { return JSON.stringify(c.fields) === json; });
-    if (same) showCharacter(same.id); else addCharacter(fields);
+    if (same) { showCharacter(same.id); } else { addCharacter(fields); ensureState(); }
 
     // В «чистом» браузере при открытии ссылки рядом с присланным персонажем
     // остаётся только что созданный пустой. Если заполнен ровно один —
     // пустые убираем, чтобы список выглядел аккуратно.
+    ensureState();
     const filled = state.chars.filter(function (c) { return !isEmptyCharacter(c); });
     if (filled.length === 1) {
       state.chars = filled;
@@ -591,6 +682,7 @@ function readShareFromUrl() {
     document.getElementById('sharedBanner').hidden = false;
   } catch (e) {
     toast('Ссылка повреждена, открыли пустого персонажа');
+    ensureState();
     addCharacter();
   }
 
@@ -623,12 +715,45 @@ function fitSheet() {
 /* --------------------------------------------------------------------------
    9. ЗАПУСК
    -------------------------------------------------------------------------- */
-function init() {
+async function init() {
   // 1) Рисуем все повторяющиеся строки листа
   buildAllRows();
 
+  // Инициализация OBR (если встроены) — храним в общих метаданных сцены
+  try {
+    const sdk = await loadSDK();
+    if (sdk && sdk.isAvailable) {
+      OBR = sdk;
+      mode.obr = true;
+      await withTimeout(new Promise((res) => {
+        try { if (OBR.isReady) res(); else OBR.onReady(res); }
+        catch { res(null); }
+      }), TIMEOUT_MS, null);
+      try {
+        if (typeof OBR.scene.onMetadataChange === "function") {
+          OBR.scene.onMetadataChange((meta) => {
+            const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
+            if (!raw) return;
+            try {
+              const incoming = JSON.stringify(raw);
+              if (lastSavedJson && incoming === lastSavedJson) return;
+              lastSavedJson = incoming;
+            } catch {}
+            const sanitized = sanitizeState(raw);
+            if (!sanitized) return;
+            state = sanitized;
+            ensureState();
+            applyToForm(currentChar().fields);
+            renderSelect();
+          });
+        }
+      } catch {}
+    }
+  } catch {}
+
   // 2) Загружаем сохранённых персонажей (или создаём первого)
-  state = loadState();
+  state = await loadState();
+  ensureState();
 
   // 3) Слушаем изменения формы: любая правка → автосохранение
   const sheet = document.getElementById('sheet');
@@ -665,6 +790,7 @@ function init() {
 
   // 5) Персонаж из ссылки (если есть) — перекрывает пустого первого
   const fromLink = readShareFromUrl();
+  ensureState();
 
   // 6) Показываем данные и подгоняем размер листа
   showCharacter(state.currentId);
