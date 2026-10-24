@@ -195,6 +195,7 @@ const TIMEOUT_MS = 4000;
 
 let OBR = null;
 const mode = { obr: false };
+let isGM = true;
 let lastSavedJson = null;
 
 function storageGet() {
@@ -734,6 +735,16 @@ function fitSheet() {
 /* --------------------------------------------------------------------------
    9. ЗАПУСК
    -------------------------------------------------------------------------- */
+function updatePublishButton() {
+  const btnPublish = document.getElementById('btnPublish');
+  if (!btnPublish) return;
+  if (mode.obr && OBR && isGM) {
+    btnPublish.style.display = 'inline-flex';
+  } else {
+    btnPublish.style.display = 'none';
+  }
+}
+
 async function init() {
   // 1) Рисуем все повторяющиеся строки листа
   buildAllRows();
@@ -748,6 +759,21 @@ async function init() {
         try { if (OBR.isReady) res(); else OBR.onReady(res); }
         catch { res(null); }
       }), TIMEOUT_MS, null);
+      try {
+        if (typeof OBR.player && typeof OBR.player.getRole === "function") {
+          const role = await withTimeout(Promise.resolve().then(() => OBR.player.getRole()), TIMEOUT_MS, "PLAYER");
+          isGM = role === "GM";
+        }
+      } catch {}
+      try {
+        if (typeof OBR.player && typeof OBR.player.onChange === "function") {
+          OBR.player.onChange((p) => {
+            if (!p || !p.role) return;
+            isGM = p.role === "GM";
+            updatePublishButton();
+          });
+        }
+      } catch {}
       try {
         if (typeof OBR.scene.onMetadataChange === "function") {
           OBR.scene.onMetadataChange((meta) => {
@@ -773,17 +799,30 @@ async function init() {
   // 2) Загружаем сохранённых персонажей
   // В OBR всегда приоритет у общих метаданных сцены — так все игроки видят одних и тех же персонажей
   state = await loadState();
-  // Если в OBR нет общего списка — один раз мигрируем локальные листы в сцену
+  // Если в OBR нет общего списка — один раз мигрируем локальные листы в сцену (только GM)
   if (mode.obr && OBR && state && Array.isArray(state.chars) && state.chars.length) {
+    try {
+      if (typeof OBR.player && typeof OBR.player.getRole === "function") {
+        const role = await withTimeout(Promise.resolve().then(() => OBR.player.getRole()), TIMEOUT_MS, "PLAYER");
+        isGM = role === "GM";
+      }
+    } catch {}
     try {
       const meta = await withTimeout(OBR.scene.getMetadata(), TIMEOUT_MS, null);
       const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
-      if (!raw) {
+      if (!raw && isGM) {
         await saveStateToRemote(state);
+      } else if (raw) {
+        const sanitized = sanitizeState(raw);
+        if (sanitized) {
+          try { lastSavedJson = JSON.stringify(sanitized); } catch {}
+          state = sanitized;
+        }
       }
     } catch {}
   }
   ensureState();
+  updatePublishButton();
 
   // 3) Слушаем изменения формы: любая правка → автосохранение
   const sheet = document.getElementById('sheet');
@@ -810,6 +849,27 @@ async function init() {
     e.target.value = '';   // чтобы можно было выбрать тот же файл повторно
   });
   document.getElementById('btnLink').addEventListener('click', copyShareLink);
+  const btnPublish = document.getElementById('btnPublish');
+  if (btnPublish) {
+    btnPublish.style.display = 'none';
+    btnPublish.addEventListener('click', async function () {
+      ensureState();
+      if (!mode.obr || !OBR || !isGM) {
+        toast('Только Ведущий может опубликовать листы в комнату');
+        return;
+      }
+      btnPublish.disabled = true;
+      try {
+        const ok = await saveStateToRemote(state);
+        if (ok) toast('Листы опубликованы для всей комнаты');
+        else toast('Не удалось опубликовать — попробуйте ещё раз');
+      } catch (e) {
+        toast('Не удалось опубликовать');
+      } finally {
+        btnPublish.disabled = false;
+      }
+    });
+  }
   document.getElementById('btnHideBanner').addEventListener('click', function () {
     document.getElementById('sharedBanner').hidden = true;
   });
@@ -824,8 +884,21 @@ async function init() {
 
   // 6) Показываем данные и подгоняем размер листа
   ensureState();
-  state = await loadState();
+  try {
+    const meta = await withTimeout(OBR && OBR.scene ? OBR.scene.getMetadata() : null, TIMEOUT_MS, null);
+    if (mode.obr && meta) {
+      const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
+      if (raw) {
+        const sanitized = sanitizeState(raw);
+        if (sanitized) {
+          try { lastSavedJson = JSON.stringify(sanitized); } catch {}
+          state = sanitized;
+        }
+      }
+    }
+  } catch {}
   ensureState();
+  updatePublishButton();
   showCharacter(state.currentId);
   if (!fromLink) applyToForm(currentChar().fields);
   fitSheet();
