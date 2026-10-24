@@ -258,6 +258,20 @@ async function loadStateRemote() {
   return null;
 }
 
+async function saveStateToRemote(s) {
+  if (mode.obr && OBR) {
+    try {
+      const json = JSON.stringify(s);
+      lastSavedJson = json;
+      await withTimeout(OBR.scene.setMetadata({ [SHEET_META_KEY]: s }), TIMEOUT_MS, null);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
+}
+
 function loadStateLocal() {
   const raw = storageGet();
   if (raw) {
@@ -280,18 +294,23 @@ async function loadState() {
 
 async function saveState() {
   const json = JSON.stringify(state);
+  let savedToRemote = false;
   if (mode.obr && OBR) {
     try {
       lastSavedJson = json;
       await withTimeout(OBR.scene.setMetadata({ [SHEET_META_KEY]: state }), TIMEOUT_MS, null);
-      return;
+      savedToRemote = true;
     } catch (e) {
       // если не получилось сохранить в сцену — сохраняем локально как fallback
     }
   }
   try { 
-    lastSavedJson = json;
-    storageSet(json); 
+    if (!savedToRemote || !mode.obr) {
+      lastSavedJson = json;
+      storageSet(json); 
+    } else {
+      lastSavedJson = json;
+    }
   } catch (e) { /* нет хранилища — переживём */ }
 }
 
@@ -751,8 +770,19 @@ async function init() {
     }
   } catch {}
 
-  // 2) Загружаем сохранённых персонажей (или создаём первого)
+  // 2) Загружаем сохранённых персонажей
+  // В OBR всегда приоритет у общих метаданных сцены — так все игроки видят одних и тех же персонажей
   state = await loadState();
+  // Если в OBR нет общего списка — один раз мигрируем локальные листы в сцену
+  if (mode.obr && OBR && state && Array.isArray(state.chars) && state.chars.length) {
+    try {
+      const meta = await withTimeout(OBR.scene.getMetadata(), TIMEOUT_MS, null);
+      const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
+      if (!raw) {
+        await saveStateToRemote(state);
+      }
+    } catch {}
+  }
   ensureState();
 
   // 3) Слушаем изменения формы: любая правка → автосохранение
@@ -793,6 +823,9 @@ async function init() {
   ensureState();
 
   // 6) Показываем данные и подгоняем размер листа
+  ensureState();
+  state = await loadState();
+  ensureState();
   showCharacter(state.currentId);
   if (!fromLink) applyToForm(currentChar().fields);
   fitSheet();
