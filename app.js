@@ -223,6 +223,37 @@ async function loadSDK() {
   }
 }
 
+// Роль в OBR иногда не приходит с первого раза — пробуем несколько попыток.
+async function detectRole(attempts = 5) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      if (OBR && OBR.player && typeof OBR.player.getRole === "function") {
+        const role = await withTimeout(Promise.resolve().then(() => OBR.player.getRole()), 2500, null);
+        if (role === "GM" || role === "PLAYER") return role;
+      }
+    } catch (e) { /* пробуем ещё */ }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 700));
+  }
+  return null;
+}
+
+// Общий обработчик обновлений общих метаданных (комната или сцена).
+function handleRemoteMeta(meta) {
+  const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
+  if (!raw) return;
+  try {
+    const incoming = JSON.stringify(raw);
+    if (lastSavedJson && incoming === lastSavedJson) return;
+    lastSavedJson = incoming;
+  } catch (e) { /* игнор */ }
+  const sanitized = sanitizeState(raw);
+  if (!sanitized) return;
+  state = sanitized;
+  ensureState();
+  applyToForm(currentChar().fields);
+  renderSelect();
+}
+
 function sanitizeState(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (Array.isArray(raw.chars) && raw.chars.length) {
@@ -240,37 +271,71 @@ function sanitizeState(raw) {
 /** Состояние всего приложения: текущий персонаж + список персонажей. */
 let state = { currentId: null, chars: [] };
 
-async function loadStateRemote() {
-  if (mode.obr && OBR) {
-    try {
-      const meta = await withTimeout(OBR.scene.getMetadata(), TIMEOUT_MS, null);
-      const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
-      if (raw) {
-        const sanitized = sanitizeState(raw);
-        if (sanitized) {
-          try { lastSavedJson = JSON.stringify(sanitized); } catch {}
-          return sanitized;
+async function getRemoteMeta() {
+  if (!(mode.obr && OBR)) return null;
+  let meta = null;
+  try {
+    if (OBR.room && typeof OBR.room.getMetadata === 'function') {
+      meta = await withTimeout(OBR.room.getMetadata(), TIMEOUT_MS, null);
+      if (meta) {
+        const raw = meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]);
+        if (raw) {
+          const sanitized = sanitizeState(raw);
+          if (sanitized) {
+            try { lastSavedJson = JSON.stringify(sanitized); } catch {}
+            return { sanitized, source: 'room' };
+          }
         }
       }
-    } catch (e) {
-      // ignore
     }
-  }
+  } catch (e) {}
+  try {
+    if (OBR.scene && typeof OBR.scene.getMetadata === 'function') {
+      meta = await withTimeout(OBR.scene.getMetadata(), TIMEOUT_MS, null);
+      if (meta) {
+        const raw = meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]);
+        if (raw) {
+          const sanitized = sanitizeState(raw);
+          if (sanitized) {
+            try { lastSavedJson = JSON.stringify(sanitized); } catch {}
+            return { sanitized, source: 'scene' };
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+async function loadStateRemote() {
+  const res = await getRemoteMeta();
+  if (res && res.sanitized) return res.sanitized;
   return null;
 }
 
 async function saveStateToRemote(s) {
-  if (mode.obr && OBR) {
-    try {
-      const json = JSON.stringify(s);
-      lastSavedJson = json;
-      await withTimeout(OBR.scene.setMetadata({ [SHEET_META_KEY]: s }), TIMEOUT_MS, null);
-      return true;
-    } catch (e) {
-      return false;
+  if (!(mode.obr && OBR)) return false;
+  const payload = JSON.parse(JSON.stringify(s));
+  const json = JSON.stringify(payload);
+  lastSavedJson = json;
+  let ok = false;
+  try {
+    if (OBR.room && typeof OBR.room.setMetadata === 'function') {
+      await withTimeout(OBR.room.setMetadata({ [SHEET_META_KEY]: payload }), TIMEOUT_MS, null);
+      ok = true;
     }
+  } catch (e) {
+    console.warn('room.setMetadata failed', e);
   }
-  return false;
+  try {
+    if (OBR.scene && typeof OBR.scene.setMetadata === 'function') {
+      await withTimeout(OBR.scene.setMetadata({ [SHEET_META_KEY]: payload }), TIMEOUT_MS, null);
+      ok = true;
+    }
+  } catch (e) {
+    console.warn('scene.setMetadata failed', e);
+  }
+  return ok;
 }
 
 function loadStateLocal() {
@@ -297,13 +362,20 @@ async function saveState() {
   const json = JSON.stringify(state);
   let savedToRemote = false;
   if (mode.obr && OBR) {
+    const payload = JSON.parse(JSON.stringify(state));
     try {
       lastSavedJson = json;
-      await withTimeout(OBR.scene.setMetadata({ [SHEET_META_KEY]: state }), TIMEOUT_MS, null);
-      savedToRemote = true;
-    } catch (e) {
-      // если не получилось сохранить в сцену — сохраняем локально как fallback
-    }
+      if (OBR.room && typeof OBR.room.setMetadata === 'function') {
+        await withTimeout(OBR.room.setMetadata({ [SHEET_META_KEY]: payload }), TIMEOUT_MS, null);
+        savedToRemote = true;
+      }
+    } catch (e) {}
+    try {
+      if (OBR.scene && typeof OBR.scene.setMetadata === 'function') {
+        await withTimeout(OBR.scene.setMetadata({ [SHEET_META_KEY]: payload }), TIMEOUT_MS, null);
+        savedToRemote = true;
+      }
+    } catch (e) {}
   }
   try { 
     if (!savedToRemote || !mode.obr) {
@@ -769,63 +841,49 @@ async function init() {
       }), TIMEOUT_MS, null);
       try {
         if (typeof OBR.player && typeof OBR.player.getRole === "function") {
-          const role = await withTimeout(Promise.resolve().then(() => OBR.player.getRole()), TIMEOUT_MS, "PLAYER");
-          isGM = role === "GM";
+          const role = await detectRole();
+          isGM = role !== "PLAYER";   // роль не узнали — не блокируем GM-действия
         }
       } catch {}
       try {
         if (typeof OBR.player && typeof OBR.player.onChange === "function") {
           OBR.player.onChange((p) => {
-            if (!p || !p.role) return;
-            isGM = p.role === "GM";
-            updatePublishButton();
+            if (!p) return;
+            if (p.role === "GM" || p.role === "PLAYER") {
+              isGM = p.role === "GM";
+              updatePublishButton();
+            }
           });
         }
       } catch {}
       try {
+        if (typeof OBR.room.onMetadataChange === "function") {
+          OBR.room.onMetadataChange(handleRemoteMeta);
+        }
+      } catch {}
+      try {
         if (typeof OBR.scene.onMetadataChange === "function") {
-          OBR.scene.onMetadataChange((meta) => {
-            const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
-            if (!raw) return;
-            try {
-              const incoming = JSON.stringify(raw);
-              if (lastSavedJson && incoming === lastSavedJson) return;
-              lastSavedJson = incoming;
-            } catch {}
-            const sanitized = sanitizeState(raw);
-            if (!sanitized) return;
-            state = sanitized;
-            ensureState();
-            applyToForm(currentChar().fields);
-            renderSelect();
-          });
+          OBR.scene.onMetadataChange(handleRemoteMeta);
         }
       } catch {}
     }
   } catch {}
 
   // 2) Загружаем сохранённых персонажей
-  // В OBR всегда приоритет у общих метаданных сцены — так все игроки видят одних и тех же персонажей
+  // В OBR приоритет у общих метаданных комнаты (потом сцены) — так все игроки видят одних и тех же персонажей
   state = await loadState();
-  // Если в OBR нет общего списка — один раз мигрируем локальные листы в сцену (только GM)
+  // Если в OBR общий список пуст — мигрируем локальные листы в общие метаданные (только GM)
   if (mode.obr && OBR && state && Array.isArray(state.chars) && state.chars.length) {
     try {
-      if (typeof OBR.player && typeof OBR.player.getRole === "function") {
-        const role = await withTimeout(Promise.resolve().then(() => OBR.player.getRole()), TIMEOUT_MS, "PLAYER");
-        isGM = role === "GM";
-      }
+      const role = await detectRole();
+      if (role) isGM = role === "GM";
     } catch {}
     try {
-      const meta = await withTimeout(OBR.scene.getMetadata(), TIMEOUT_MS, null);
-      const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
-      if (!raw && isGM) {
+      const remote = await getRemoteMeta();
+      if (!remote && isGM) {
         await saveStateToRemote(state);
-      } else if (raw) {
-        const sanitized = sanitizeState(raw);
-        if (sanitized) {
-          try { lastSavedJson = JSON.stringify(sanitized); } catch {}
-          state = sanitized;
-        }
+      } else if (remote && remote.sanitized) {
+        state = remote.sanitized;
       }
     } catch {}
   }
@@ -863,12 +921,21 @@ async function init() {
     btnPublish.disabled = true;
     btnPublish.addEventListener('click', async function () {
       ensureState();
-      if (!mode.obr || !OBR || !isGM) {
-        toast('Только Ведущий может опубликовать листы в комнату');
+      if (!mode.obr || !OBR) {
+        toast('Кнопка работает только в Owlbear Rodeo');
         return;
       }
       btnPublish.disabled = true;
-      toast('Публикую...');
+      try {
+        const role = await detectRole(3);
+        if (role) isGM = role === 'GM';
+      } catch {}
+      if (!isGM) {
+        toast('Только Ведущий может опубликовать листы в комнату');
+        updatePublishButton();
+        return;
+      }
+      toast('Публикую ' + state.chars.length + ' лист(ов)...');
       try {
         const ok = await saveStateToRemote(state);
         if (ok) toast('Листы опубликованы для всей комнаты');
@@ -896,16 +963,9 @@ async function init() {
   // 6) Показываем данные и подгоняем размер листа
   ensureState();
   try {
-    const meta = await withTimeout(OBR && OBR.scene ? OBR.scene.getMetadata() : null, TIMEOUT_MS, null);
-    if (mode.obr && meta) {
-      const raw = meta && (meta[SHEET_META_KEY] || (meta.items && meta.items[SHEET_META_KEY]));
-      if (raw) {
-        const sanitized = sanitizeState(raw);
-        if (sanitized) {
-          try { lastSavedJson = JSON.stringify(sanitized); } catch {}
-          state = sanitized;
-        }
-      }
+    const remote = await getRemoteMeta();
+    if (mode.obr && remote && remote.sanitized) {
+      state = remote.sanitized;
     }
   } catch {}
   ensureState();
